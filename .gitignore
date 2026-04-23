@@ -1,0 +1,11 @@
+__pycache__/
+.venv/
+data/
+debug/
+logs/
+
+.DS_STORE
+.env
+*.csv
+*.log
+*.xlsx
