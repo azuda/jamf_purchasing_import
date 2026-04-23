@@ -86,7 +86,7 @@ def main():
   devices = jamf_get("/JSSResource/mobiledevices", token).json()
 
   # parse assetsonar csv to dict
-  with open("data/assets.csv", "r") as f:
+  with open("assets.csv", "r") as f:
     reader = csv.DictReader(f)
     AS_DATA = {row["sn"]: {k.lower(): v for k, v in row.items() if k.lower() != "sn"} for row in reader}
 

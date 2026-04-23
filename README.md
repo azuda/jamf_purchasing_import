@@ -24,5 +24,5 @@ gpg --output .env --decrypt .env.gpg
   - vendor
   - price
 - above filename and column names must match (case insensitive)
-- move `assets.csv` to `./data/`
+- move / copy `assets.csv` to project dir
 - run `./run.sh`
