@@ -6,7 +6,6 @@
 
 from dateutil import parser
 from dateutil.tz import tzoffset
-import re
 
 # ==================================================================================
 
@@ -28,6 +27,14 @@ def convert_datetime(timestamp):
   dt = parser.parse(timestamp, tzinfos=TZ_INFO)
   return dt.strftime("%Y-%m-%d %H:%M:%S")
 
+def convert_date_epoch(timestamp):
+  dt = parser.parse(timestamp, tzinfos=TZ_INFO)
+  return int(dt.timestamp())
+
 def convert_date_simple(timestamp):
   dt = parser.parse(timestamp)
   return dt.strftime("%Y-%m-%d")
+
+def convert_zoned_datetime(timestamp):
+  dt = parser.parse(timestamp, tzinfos=TZ_INFO)
+  return dt.strftime(f"%Y-%m-%dT%H:%M:%S.{dt.strftime("%f")[:3]}Z")

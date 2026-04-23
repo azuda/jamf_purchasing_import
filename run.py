@@ -13,6 +13,10 @@ import requests
 import time
 import urllib3
 
+from util import convert_date_simple, convert_zoned_datetime
+
+TESTING = True
+
 # ==================================================================================
 
 def jamf_get(endpoint, token):
@@ -69,64 +73,88 @@ def main():
   print("Jamf Pro version:", version.json()["version"])
 
   # computers
-  computers = jamf_get("/JSSResource/computers/subset/basic", token)
+  computers = jamf_get("/JSSResource/computers/subset/basic", token).json()
   # mobile devices
-  devices = jamf_get("/JSSResource/mobiledevices", token)
+  devices = jamf_get("/JSSResource/mobiledevices", token).json()
 
-  # write raw
+  # parse assetsonar csv to dict
+  with open("data/assets.csv", "r") as f:
+    reader = csv.DictReader(f)
+    AS_DATA = {row["sn"]: {k: v for k, v in row.items() if k != "sn"} for row in reader}
+
+  # write raw data handling stuff for debug
   if not os.path.exists("debug"):
     os.makedirs("debug")
   with open("debug/c.json", "w") as f:
-    f.write(json.dumps(computers.json(), indent=2))
+    f.write(json.dumps(computers, indent=2))
   with open("debug/d.json", "w") as f:
-    f.write(json.dumps(devices.json(), indent=2))
-
-  # parse assetsonar csv to dict
-  AS_DATA = {}
-  with open("data/as.csv", "r") as f:
-    reader = csv.reader(f)
-    for row in reader:
-      AS_DATA[row[0]] = {}
+    f.write(json.dumps(devices, indent=2))
+  with open("debug/a.json", "w") as f:
+    f.write(json.dumps(AS_DATA, indent=2))
 
   # update jamf pro with purchasing info from assetsonar
-  for c in computers:
-    jamf_id = c["id"]
+  count = 10
+  for c in computers["computers"]:
+    if TESTING:
+      if count < 1:
+        break
+      count -= 1
+
     sn = c["serial_number"]
-    if False: # if match with assetsonar row
-      print(f"Updating computer {sn} with id {jamf_id}")
-      as_row = AS_DATA.get(sn)
+    if sn:
+      print(f"Updating computer {c["id"]} {sn}")
+      asset = AS_DATA[sn]
       payload = { "purchasing": {
         "leased": False,
         "purchased": True,
         "poNumber": "",
-        "poDate": "",
-        "vendor": "",
-        "purchasePrice": "",
+        "poDate": convert_date_simple(asset["po_date"]) if asset.get("po_date") else "",
+        "vendor": asset["vendor"],
+        "purchasePrice": f"${asset["price"]}",
         "lifeExpectancy": 0,
-        "warrantyDate": "",
+        "warrantyDate": None,
         "appleCareId": "",
-        "leaseDate": "",
+        "leaseDate": None,
         "purchasingAccount": "",
         "purchasingContact": ""
         }}
-      jamf_patch(payload, f"/api/v1/computers-inventory-detail/{jamf_id}", token)
+      response = jamf_patch(payload, f"/api/v1/computers-inventory-detail/{c["id"]}", token)
+      # print(response.status_code, response.text)
 
 # same for devices
+  count = 10
+  for d in devices["mobile_devices"]:
+    if TESTING:
+      if count < 1:
+        break
+      count -= 1
 
-
+    sn = d["serial_number"]
+    if sn:
+      print(f"Updating device {d["id"]} {sn}")
+      try:
+        asset = AS_DATA[sn]
+      except KeyError as e:
+        print(f"Error {e}: {d["id"]} {sn} not found in assets.csv, skipping...")
+        continue
+      payload = { "ios": { "purchasing": {
+        "purchased": True,
+        "leased": False,
+        "poNumber": "",
+        "vendor": asset["vendor"],
+        "appleCareId": "",
+        "purchasePrice": f"${asset["price"]}",
+        "purchasingAccount": "",
+        **({"poDate": convert_zoned_datetime(asset["po_date"])} if asset.get("po_date") else {}),
+        "lifeExpectancy": 0,
+        "purchasingContact": "",
+      }}}
+      # print(json.dumps(payload, indent=2))
+      response = jamf_patch(payload, f"/api/v2/mobile-devices/{d["id"]}", token)
+      # print(response.status_code, response.text)
 
   # kill jamf access token
   invalidate_token(access_token)
-
-  # # write results
-  # if not os.path.exists("data"):
-  #   os.makedirs("data")
-  # with open("data/computers.json", "w") as f:
-  #   f.write(json.dumps(computers, indent=2))
-  # print("--- Jamf computers saved to ./data/computers.json ---")
-  # with open("data/devices.json", "w") as f:
-  #   f.write(json.dumps(devices, indent=2))
-  # print("--- Jamf devices saved to ./data/devices.json ---")
 
   print("\nDone")
 
