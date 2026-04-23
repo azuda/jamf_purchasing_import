@@ -6,6 +6,8 @@
 """
 
 import csv
+from dateutil import parser
+from dateutil.tz import tzoffset
 from jamf_credential import JAMF_URL, check_token_expiration, get_token, invalidate_token
 import json
 import os
@@ -13,15 +15,34 @@ import requests
 import time
 import urllib3
 
-from util import convert_date_simple, convert_zoned_datetime
+# define ambiguous timezones
+TZ_INFO = {
+  "EDT": tzoffset("EDT", -4 * 3600),  # UTC-4
+  "EST": tzoffset("EST", -5 * 3600),  # UTC-5
+  "CDT": tzoffset("CDT", -5 * 3600),  # UTC-5
+  "CST": tzoffset("CST", -6 * 3600),  # UTC-6
+  "MDT": tzoffset("MDT", -6 * 3600),  # UTC-6
+  "MST": tzoffset("MST", -7 * 3600),  # UTC-7
+  "PDT": tzoffset("PDT", -7 * 3600),  # UTC-7
+  "PST": tzoffset("PST", -8 * 3600),  # UTC-8
+}
 
 TESTING = True
 
 # ==================================================================================
 
+def convert_dt_simple(timestamp):
+  dt = parser.parse(timestamp)
+  return dt.strftime("%Y-%m-%d")
+
+def convert_dt_zoned(timestamp):
+  dt = parser.parse(timestamp, tzinfos=TZ_INFO)
+  return dt.strftime(f"%Y-%m-%dT%H:%M:%S.{dt.strftime("%f")[:3]}Z")
+
+# ==================================================================================
+
 def jamf_get(endpoint, token):
   token["t"], token["expiration"] = check_token_expiration(token["t"], token["expiration"])
-
   url = f"{JAMF_URL}{endpoint}"
   headers = {
     "accept": "application/json",
@@ -30,21 +51,8 @@ def jamf_get(endpoint, token):
   response = requests.get(url, headers=headers, verify=False)
   return response
 
-def jamf_put(payload, endpoint, token):
-  token["t"], token["expiration"] = check_token_expiration(token["t"], token["expiration"])
-
-  url = f"{JAMF_URL}{endpoint}"
-  headers = {
-    "accept": "application/json",
-    "content-type": "application/json",
-    "authorization": f"Bearer {token["t"]}"
-  }
-  response = requests.put(url, json=payload, headers=headers, verify=False)
-  return response
-
 def jamf_patch(payload, endpoint, token):
   token["t"], token["expiration"] = check_token_expiration(token["t"], token["expiration"])
-
   url = f"{JAMF_URL}{endpoint}"
   headers = {
     "accept": "application/json",
@@ -80,7 +88,7 @@ def main():
   # parse assetsonar csv to dict
   with open("data/assets.csv", "r") as f:
     reader = csv.DictReader(f)
-    AS_DATA = {row["sn"]: {k: v for k, v in row.items() if k != "sn"} for row in reader}
+    AS_DATA = {row["sn"]: {k.lower(): v for k, v in row.items() if k.lower() != "sn"} for row in reader}
 
   # write raw data handling stuff for debug
   if not os.path.exists("debug"):
@@ -108,7 +116,7 @@ def main():
         "leased": False,
         "purchased": True,
         "poNumber": "",
-        "poDate": convert_date_simple(asset["po_date"]) if asset.get("po_date") else "",
+        "poDate": convert_dt_simple(asset["po_date"]) if asset.get("po_date") else "",
         "vendor": asset["vendor"],
         "purchasePrice": f"${asset["price"]}",
         "lifeExpectancy": 0,
@@ -145,7 +153,7 @@ def main():
         "appleCareId": "",
         "purchasePrice": f"${asset["price"]}",
         "purchasingAccount": "",
-        **({"poDate": convert_zoned_datetime(asset["po_date"])} if asset.get("po_date") else {}),
+        **({"poDate": convert_dt_zoned(asset["po_date"])} if asset.get("po_date") else {}),
         "lifeExpectancy": 0,
         "purchasingContact": "",
       }}}
@@ -155,8 +163,6 @@ def main():
 
   # kill jamf access token
   invalidate_token(access_token)
-
-  print("\nDone")
 
 # ==================================================================================
 
