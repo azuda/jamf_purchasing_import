@@ -13,14 +13,14 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
-gpg --output .env --decrypt .env.gpg
+gpg .env.gpg
 ```
 
 # usage
 
 - create / rename file `assets.csv` with columns:
   - sn
-  - po_date
+  - purchase_date
   - vendor
   - price
 - above filename and column names must match (case insensitive)

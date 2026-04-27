@@ -27,7 +27,7 @@ TZ_INFO = {
   "PST": tzoffset("PST", -8 * 3600),  # UTC-8
 }
 
-TESTING = True
+TESTING = False
 
 # ==================================================================================
 
@@ -101,7 +101,7 @@ def main():
     f.write(json.dumps(AS_DATA, indent=2))
 
   # update jamf pro with purchasing info from assetsonar
-  count = 10
+  count = 100
   for c in computers["computers"]:
     if TESTING:
       if count < 1:
@@ -111,12 +111,16 @@ def main():
     sn = c["serial_number"]
     if sn:
       print(f"Updating computer {c["id"]} {sn}")
-      asset = AS_DATA[sn]
+      try:
+        asset = AS_DATA[sn]
+      except KeyError as e:
+        print(f"Error {e}: {c["id"]} {sn} not found in assets.csv, skipping...")
+        continue
       payload = { "purchasing": {
         "leased": False,
         "purchased": True,
         "poNumber": "",
-        "poDate": convert_dt_simple(asset["po_date"]) if asset.get("po_date") else "",
+        "poDate": convert_dt_simple(asset["purchase_date"]) if asset.get("purchase_date") else "",
         "vendor": asset["vendor"],
         "purchasePrice": f"${asset["price"]}",
         "lifeExpectancy": 0,
@@ -130,7 +134,7 @@ def main():
       # print(response.status_code, response.text)
 
 # same for devices
-  count = 10
+  count = 100
   for d in devices["mobile_devices"]:
     if TESTING:
       if count < 1:
@@ -145,6 +149,8 @@ def main():
       except KeyError as e:
         print(f"Error {e}: {d["id"]} {sn} not found in assets.csv, skipping...")
         continue
+
+      # api ref: https://developer.jamf.com/jamf-pro/reference/patch_v2-mobile-devices-id
       payload = { "ios": { "purchasing": {
         "purchased": True,
         "leased": False,
@@ -153,12 +159,13 @@ def main():
         "appleCareId": "",
         "purchasePrice": f"${asset["price"]}",
         "purchasingAccount": "",
-        **({"poDate": convert_dt_zoned(asset["po_date"])} if asset.get("po_date") else {}),
+        **({"poDate": convert_dt_zoned(asset["purchase_date"])} if asset.get("purchase_date") else {}),
         "lifeExpectancy": 0,
         "purchasingContact": "",
       }}}
       # print(json.dumps(payload, indent=2))
       response = jamf_patch(payload, f"/api/v2/mobile-devices/{d["id"]}", token)
+      time.sleep(0.2)
       # print(response.status_code, response.text)
 
   # kill jamf access token
