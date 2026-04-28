@@ -5,6 +5,7 @@
 - save device id and sn to json
 """
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import csv
 from dateutil import parser
 from dateutil.tz import tzoffset
@@ -12,8 +13,14 @@ from jamf_credential import JAMF_URL, check_token_expiration, get_token, invalid
 import json
 import os
 import requests
+from requests.adapters import HTTPAdapter
 import time
 import urllib3
+from urllib3.util.retry import Retry
+
+TESTING = False
+
+# ==================================================================================
 
 # define ambiguous timezones
 TZ_INFO = {
@@ -27,10 +34,6 @@ TZ_INFO = {
   "PST": tzoffset("PST", -8 * 3600),  # UTC-8
 }
 
-TESTING = False
-
-# ==================================================================================
-
 def convert_dt_simple(timestamp):
   dt = parser.parse(timestamp)
   return dt.strftime("%Y-%m-%d")
@@ -40,6 +43,19 @@ def convert_dt_zoned(timestamp):
   return dt.strftime(f"%Y-%m-%dT%H:%M:%S.{dt.strftime("%f")[:3]}Z")
 
 # ==================================================================================
+
+def make_session():
+  session = requests.Session()
+  retry = Retry(
+    total=3,
+    backoff_factor=0.5,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET", "PATCH"],
+    raise_on_status=False,
+  )
+  adapter = HTTPAdapter(max_retries=retry)
+  session.mount("https://", adapter)
+  return session
 
 def jamf_get(endpoint, token):
   token["t"], token["expiration"] = check_token_expiration(token["t"], token["expiration"])
@@ -51,7 +67,7 @@ def jamf_get(endpoint, token):
   response = requests.get(url, headers=headers, verify=False)
   return response
 
-def jamf_patch(payload, endpoint, token):
+def jamf_patch(payload, endpoint, token, session):
   token["t"], token["expiration"] = check_token_expiration(token["t"], token["expiration"])
   url = f"{JAMF_URL}{endpoint}"
   headers = {
@@ -59,8 +75,63 @@ def jamf_patch(payload, endpoint, token):
     "content-type": "application/json",
     "authorization": f"Bearer {token["t"]}"
   }
-  response = requests.patch(url, json=payload, headers=headers, verify=False)
+  # response = requests.patch(url, json=payload, headers=headers, verify=False)
+  response = session.patch(url, json=payload, headers=headers, verify=False)
   return response
+
+def patch_computer(c, assets, token):
+  session = make_session()
+  sn = c["hardware"]["serialNumber"]
+  if not sn:
+    return
+  try:
+    asset = assets[sn]
+  except KeyError:
+    print(f"Not in assets.csv, skipping: {c['id']} {sn}")
+    return
+  payload = { "purchasing": {
+    "leased": False,
+    "purchased": True,
+    "poNumber": "",
+    "poDate": convert_dt_simple(asset["purchase_date"]) if asset.get("purchase_date") else "",
+    "vendor": asset["vendor"],
+    "purchasePrice": f"${asset['price']}",
+    "lifeExpectancy": 0,
+    "warrantyDate": None,
+    "appleCareId": "",
+    "leaseDate": None,
+    "purchasingAccount": "",
+    "purchasingContact": ""
+  }}
+  # https://developer.jamf.com/jamf-pro/reference/patch_v3-computers-inventory-detail-id
+  response = jamf_patch(payload, f"/api/v3/computers-inventory-detail/{c['id']}", token, session)
+  print(f"c {c['id']} {sn} → {response.status_code}")
+
+def patch_device(d, assets, token):
+  session = make_session()
+  sn = d["serialNumber"]
+  if not sn:
+    return
+  try:
+    asset = assets[sn]
+  except KeyError:
+    print(f"Not in assets.csv, skipping: {d['id']} {sn}")
+    return
+  payload = { "ios": { "purchasing": {
+    "purchased": True,
+    "leased": False,
+    "poNumber": "",
+    "vendor": asset["vendor"],
+    "appleCareId": "",
+    "purchasePrice": f"${asset['price']}",
+    "purchasingAccount": "",
+    **({"poDate": convert_dt_zoned(asset["purchase_date"])} if asset.get("purchase_date") else {}),
+    "lifeExpectancy": 0,
+    "purchasingContact": "",
+  }}}
+  # https://developer.jamf.com/jamf-pro/reference/patch_v2-mobile-devices-id
+  response = jamf_patch(payload, f"/api/v2/mobile-devices/{d['id']}", token, session)
+  print(f"d {d['id']} {sn} → {response.status_code}")
 
 # ==================================================================================
 
@@ -80,15 +151,15 @@ def main():
   version = requests.get(version_url, headers=headers, verify=False)
   print("Jamf Pro version:", version.json()["version"])
 
-  # computers
-  computers = jamf_get("/JSSResource/computers/subset/basic", token).json()
-  # mobile devices
-  devices = jamf_get("/JSSResource/mobiledevices", token).json()
+  # https://developer.jamf.com/jamf-pro/reference/get_v3-computers-inventory
+  # https://developer.jamf.com/jamf-pro/reference/get_v2-mobile-devices
+  computers = jamf_get("/api/v3/computers-inventory?section=GENERAL&section=HARDWARE&page=0&page-size=2000&sort=id%3Aasc", token).json()
+  devices = jamf_get("/api/v2/mobile-devices?page=0&page-size=2000&sort=id%3Aasc", token).json()
 
   # parse assetsonar csv to dict
   with open("assets.csv", "r") as f:
     reader = csv.DictReader(f)
-    AS_DATA = {row["sn"]: {k.lower(): v for k, v in row.items() if k.lower() != "sn"} for row in reader}
+    assets = {row["sn"]: {k.lower(): v for k, v in row.items() if k.lower() != "sn"} for row in reader}
 
   # write raw data handling stuff for debug
   if not os.path.exists("debug"):
@@ -98,75 +169,22 @@ def main():
   with open("debug/d.json", "w") as f:
     f.write(json.dumps(devices, indent=2))
   with open("debug/a.json", "w") as f:
-    f.write(json.dumps(AS_DATA, indent=2))
+    f.write(json.dumps(assets, indent=2))
 
-  # update jamf pro with purchasing info from assetsonar
-  count = 100
-  for c in computers["computers"]:
-    if TESTING:
-      if count < 1:
-        break
-      count -= 1
+  computer_list = computers["results"][:10] if TESTING else computers["results"]
+  device_list = devices["results"][:10] if TESTING else devices["results"]
 
-    sn = c["serial_number"]
-    if sn:
-      print(f"Updating computer {c["id"]} {sn}")
-      try:
-        asset = AS_DATA[sn]
-      except KeyError as e:
-        print(f"Error {e}: {c["id"]} {sn} not found in assets.csv, skipping...")
-        continue
-      payload = { "purchasing": {
-        "leased": False,
-        "purchased": True,
-        "poNumber": "",
-        "poDate": convert_dt_simple(asset["purchase_date"]) if asset.get("purchase_date") else "",
-        "vendor": asset["vendor"],
-        "purchasePrice": f"${asset["price"]}",
-        "lifeExpectancy": 0,
-        "warrantyDate": None,
-        "appleCareId": "",
-        "leaseDate": None,
-        "purchasingAccount": "",
-        "purchasingContact": ""
-        }}
-      response = jamf_patch(payload, f"/api/v1/computers-inventory-detail/{c["id"]}", token)
-      # print(response.status_code, response.text)
+  # computers
+  with ThreadPoolExecutor(max_workers=10) as executor:
+    futures = [executor.submit(patch_computer, c, assets, token) for c in computer_list]
+    for f in as_completed(futures):
+      f.result()
 
-# same for devices
-  count = 100
-  for d in devices["mobile_devices"]:
-    if TESTING:
-      if count < 1:
-        break
-      count -= 1
-
-    sn = d["serial_number"]
-    if sn:
-      print(f"Updating device {d["id"]} {sn}")
-      try:
-        asset = AS_DATA[sn]
-      except KeyError as e:
-        print(f"Error {e}: {d["id"]} {sn} not found in assets.csv, skipping...")
-        continue
-
-      # api ref: https://developer.jamf.com/jamf-pro/reference/patch_v2-mobile-devices-id
-      payload = { "ios": { "purchasing": {
-        "purchased": True,
-        "leased": False,
-        "poNumber": "",
-        "vendor": asset["vendor"],
-        "appleCareId": "",
-        "purchasePrice": f"${asset["price"]}",
-        "purchasingAccount": "",
-        **({"poDate": convert_dt_zoned(asset["purchase_date"])} if asset.get("purchase_date") else {}),
-        "lifeExpectancy": 0,
-        "purchasingContact": "",
-      }}}
-      # print(json.dumps(payload, indent=2))
-      response = jamf_patch(payload, f"/api/v2/mobile-devices/{d["id"]}", token)
-      time.sleep(0.2)
-      # print(response.status_code, response.text)
+  # devices
+  with ThreadPoolExecutor(max_workers=10) as executor:
+    futures = [executor.submit(patch_device, d, assets, token) for d in device_list]
+    for f in as_completed(futures):
+      f.result()
 
   # kill jamf access token
   invalidate_token(access_token)
