@@ -2,7 +2,7 @@
 
 - read device purchasing data from csv
 - match serial numbers with device id in jamf
-- call jamf api patch endpoint to update purchasing data
+- patch endpoint to update purchasing data in jamf
 
 # setup
 
@@ -26,3 +26,5 @@ gpg .env.gpg
 - above filename and column names must match (case insensitive)
 - move / copy `assets.csv` to project dir
 - run `./run.sh`
+
+> script takes ~4 minutes to run on average
