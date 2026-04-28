@@ -1,6 +1,7 @@
 __pycache__/
 .venv/
 debug/
+logs/
 
 .DS_STORE
 .env
