@@ -11,8 +11,8 @@ export LOG_FILE="$LOG_DIR/$timestamp.log"
 mkdir -p "$LOG_DIR"
 ls -1t "$LOG_DIR" | tail -n +5 | xargs -I {} rm -f "$LOG_DIR/{}"
 
-echo "Script start @ $(date)\n" >> "$LOG_FILE" 2>&1
+echo "Script start @ $(date)\n" | tee -a "$LOG_FILE"
 
-$VENV run.py >> "$LOG_FILE" 2>&1
+$VENV run.py 2>&1 | tee -a "$LOG_FILE"
 
-echo "\nScript done @ $(date)" >> "$LOG_FILE" 2>&1
+echo "\nScript done @ $(date)" | tee -a "$LOG_FILE"
