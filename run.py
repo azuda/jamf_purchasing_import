@@ -1,8 +1,10 @@
 # run.py
 
 """
-- get all computers and mobile devices from jamf api
-- save device id and sn to json
+- get all computers and mobile devices from jamf
+- read assets.csv to dict
+- match computer / device by sn
+- patch purchasing date, vendor, price to jamf
 """
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
