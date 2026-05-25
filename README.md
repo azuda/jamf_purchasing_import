@@ -18,13 +18,13 @@ gpg .env.gpg
 
 # usage
 
-- create / rename file `assets.csv` with columns:
-  - sn
+- when new devices are purchased, add new lines to `assets.csv`
+- need columns:
   - purchase_date
-  - vendor
   - price
-- above filename and column names must match (case insensitive)
-- move / copy `assets.csv` to project dir
+  - vendor
+  - sn
+  - device name / model (optional)
 - run `./run.sh`
 
 > script run on avg takes ~1 minute / every 500 lines in assets.csv
