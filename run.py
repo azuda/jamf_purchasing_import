@@ -21,8 +21,8 @@ import urllib3
 
 truststore.inject_into_ssl()
 
-# TESTING = False
-TESTING = True
+TESTING = False
+# TESTING = True
 
 # ==================================================================================
 
@@ -86,9 +86,11 @@ def patch_computer(c, assets, token, session):
   sn = c.get("hardware").get("serialNumber")
   if not sn:
     return
-  try:
-    asset = assets.get(sn)
-  except KeyError:
+  if c.get("purchasing").get("purchasePrice") is not None:
+    print(f"Purchasing info already populated, skipping: {c.get('id')} {sn}")
+    return
+  asset = assets.get(sn)
+  if asset is None:
     print(f"Not in assets.csv, skipping: {c.get('id')} {sn}")
     return
   payload = { "purchasing": {
@@ -113,9 +115,11 @@ def patch_device(d, assets, token, session):
   sn = d.get("hardware").get("serialNumber")
   if not sn:
     return
-  try:
-    asset = assets.get(sn)
-  except KeyError:
+  if d.get("purchasing").get("purchasePrice") is not None:
+    print(f"Purchasing info already populated, skipping: {d.get('mobileDeviceId')} {sn}")
+    return
+  asset = assets.get(sn)
+  if asset is None:
     print(f"Not in assets.csv, skipping: {d.get('mobileDeviceId')} {sn}")
     return
   payload = { "ios": { "purchasing": {
