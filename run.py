@@ -15,12 +15,14 @@ from jamf_credential import JAMF_URL, check_token_expiration, get_token, invalid
 import json
 import os
 import requests
-from requests.adapters import HTTPAdapter
 import time
+import truststore
 import urllib3
-from urllib3.util.retry import Retry
 
-TESTING = False
+truststore.inject_into_ssl()
+
+# TESTING = False
+TESTING = True
 
 # ==================================================================================
 
@@ -48,25 +50,25 @@ def convert_dt_zoned(timestamp):
 
 def make_session():
   session = requests.Session()
-  retry = Retry(
+  retry = urllib3.util.retry.Retry(
     total=3,
     backoff_factor=0.5,
     status_forcelist=[429, 500, 502, 503, 504],
     allowed_methods=["GET", "PATCH"],
     raise_on_status=False,
   )
-  adapter = HTTPAdapter(max_retries=retry)
+  adapter = requests.adapters.HTTPAdapter(max_retries=retry)
   session.mount("https://", adapter)
   return session
 
-def jamf_get(endpoint, token):
+def jamf_get(endpoint, token, session):
   token["t"], token["expiration"] = check_token_expiration(token["t"], token["expiration"])
   url = f"{JAMF_URL}{endpoint}"
   headers = {
     "accept": "application/json",
     "authorization": f"Bearer {token["t"]}"
   }
-  response = requests.get(url, headers=headers, verify=False)
+  response = session.get(url, headers=headers)
   return response
 
 def jamf_patch(payload, endpoint, token, session):
@@ -77,27 +79,25 @@ def jamf_patch(payload, endpoint, token, session):
     "content-type": "application/json",
     "authorization": f"Bearer {token["t"]}"
   }
-  # response = requests.patch(url, json=payload, headers=headers, verify=False)
-  response = session.patch(url, json=payload, headers=headers, verify=False)
+  response = session.patch(url, json=payload, headers=headers)
   return response
 
-def patch_computer(c, assets, token):
-  session = make_session()
-  sn = c["hardware"]["serialNumber"]
+def patch_computer(c, assets, token, session):
+  sn = c.get("hardware").get("serialNumber")
   if not sn:
     return
   try:
-    asset = assets[sn]
+    asset = assets.get(sn)
   except KeyError:
-    print(f"Not in assets.csv, skipping: {c['id']} {sn}")
+    print(f"Not in assets.csv, skipping: {c.get('id')} {sn}")
     return
   payload = { "purchasing": {
     "leased": False,
     "purchased": True,
     "poNumber": "",
-    "poDate": convert_dt_simple(asset["purchase_date"]) if asset.get("purchase_date") else "",
-    "vendor": asset["vendor"],
-    "purchasePrice": f"${asset['price']}",
+    "poDate": convert_dt_simple(asset.get("purchase_date", "")),
+    "vendor": asset.get("vendor"),
+    "purchasePrice": f"${asset.get('price')}",
     "lifeExpectancy": 0,
     "warrantyDate": None,
     "appleCareId": "",
@@ -106,34 +106,33 @@ def patch_computer(c, assets, token):
     "purchasingContact": ""
   }}
   # https://developer.jamf.com/jamf-pro/reference/patch_v3-computers-inventory-detail-id
-  response = jamf_patch(payload, f"/api/v3/computers-inventory-detail/{c['id']}", token, session)
-  print(f"c {c['id']} {sn} → {response.status_code}")
+  response = jamf_patch(payload, f"/api/v3/computers-inventory-detail/{c.get('id')}", token, session)
+  print(f"c {c.get('id')}\t{sn} → {response.status_code}")
 
-def patch_device(d, assets, token):
-  session = make_session()
-  sn = d["serialNumber"]
+def patch_device(d, assets, token, session):
+  sn = d.get("hardware").get("serialNumber")
   if not sn:
     return
   try:
-    asset = assets[sn]
+    asset = assets.get(sn)
   except KeyError:
-    print(f"Not in assets.csv, skipping: {d['id']} {sn}")
+    print(f"Not in assets.csv, skipping: {d.get('mobileDeviceId')} {sn}")
     return
   payload = { "ios": { "purchasing": {
     "purchased": True,
     "leased": False,
     "poNumber": "",
-    "vendor": asset["vendor"],
+    "vendor": asset.get("vendor"),
     "appleCareId": "",
-    "purchasePrice": f"${asset['price']}",
+    "purchasePrice": f"${asset.get('price')}",
     "purchasingAccount": "",
     **({"poDate": convert_dt_zoned(asset["purchase_date"])} if asset.get("purchase_date") else {}),
     "lifeExpectancy": 0,
     "purchasingContact": "",
   }}}
   # https://developer.jamf.com/jamf-pro/reference/patch_v2-mobile-devices-id
-  response = jamf_patch(payload, f"/api/v2/mobile-devices/{d['id']}", token, session)
-  print(f"d {d['id']} {sn} → {response.status_code}")
+  response = jamf_patch(payload, f"/api/v2/mobile-devices/{d.get('mobileDeviceId')}", token, session)
+  print(f"d {d.get('mobileDeviceId')}\t{sn} → {response.status_code}")
 
 # ==================================================================================
 
@@ -144,19 +143,13 @@ def main():
     "t": access_token,
     "expiration": int(time.time()) + expires_in,
   }
-  token_expiration_epoch = int(time.time()) + expires_in
-  print(f"Token valid for {expires_in} seconds")
 
-  # print jamf pro version
-  version_url = f"{JAMF_URL}/api/v1/jamf-pro-version"
-  headers = {"Authorization": f"Bearer {access_token}"}
-  version = requests.get(version_url, headers=headers, verify=False)
-  print("Jamf Pro version:", version.json()["version"])
+  session = make_session()
 
   # https://developer.jamf.com/jamf-pro/reference/get_v3-computers-inventory
-  # https://developer.jamf.com/jamf-pro/reference/get_v2-mobile-devices
-  computers = jamf_get("/api/v3/computers-inventory?section=GENERAL&section=HARDWARE&page=0&page-size=2000&sort=id%3Aasc", token).json()
-  devices = jamf_get("/api/v2/mobile-devices?page=0&page-size=2000&sort=id%3Aasc", token).json()
+  # https://developer.jamf.com/jamf-pro/reference/get_v2-mobile-devices-detail
+  computers = jamf_get("/api/v3/computers-inventory?section=GENERAL&section=HARDWARE&section=PURCHASING&page=0&page-size=2000&sort=id%3Aasc", token, session).json()
+  devices = jamf_get("/api/v2/mobile-devices/detail?section=GENERAL&section=HARDWARE&section=PURCHASING&page=0&page-size=100&sort=mobileDeviceId%3Aasc", token, session).json()
 
   # parse assetsonar csv to dict
   with open("assets.csv", "r", encoding="utf-8-sig") as f:
@@ -178,13 +171,13 @@ def main():
 
   # computers
   with ThreadPoolExecutor(max_workers=10) as executor:
-    futures = [executor.submit(patch_computer, c, assets, token) for c in computer_list]
+    futures = [executor.submit(patch_computer, c, assets, token, session) for c in computer_list]
     for f in as_completed(futures):
       f.result()
 
   # devices
   with ThreadPoolExecutor(max_workers=10) as executor:
-    futures = [executor.submit(patch_device, d, assets, token) for d in device_list]
+    futures = [executor.submit(patch_device, d, assets, token, session) for d in device_list]
     for f in as_completed(futures):
       f.result()
 
@@ -194,5 +187,4 @@ def main():
 # ==================================================================================
 
 if __name__ == "__main__":
-  urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
   main()
