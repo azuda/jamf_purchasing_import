@@ -89,6 +89,8 @@ def patch_computer(c, assets, token, session):
   if c.get("purchasing").get("purchasePrice") is not None:
     print(f"Purchasing info already populated, skipping: {c.get('id')} {sn}")
     return
+  # if int(c.get("id")) <= 3392:
+  #   return
   asset = assets.get(sn)
   if asset is None:
     print(f"Not in assets.csv, skipping: {c.get('id')} {sn}")
@@ -118,6 +120,8 @@ def patch_device(d, assets, token, session):
   if d.get("purchasing").get("purchasePrice") is not None:
     print(f"Purchasing info already populated, skipping: {d.get('mobileDeviceId')} {sn}")
     return
+  # if int(d.get("mobileDeviceId")) <= 1000:
+  #   return
   asset = assets.get(sn)
   if asset is None:
     print(f"Not in assets.csv, skipping: {d.get('mobileDeviceId')} {sn}")

@@ -13,6 +13,6 @@ ls -1t "$LOG_DIR" | tail -n +5 | xargs -I {} rm -f "$LOG_DIR/{}"
 
 echo "Script start @ $(date)\n" | tee -a "$LOG_FILE"
 
-$VENV run.py 2>&1 | tee -a "$LOG_FILE"
+$VENV -u run.py 2>&1 | tee -a "$LOG_FILE"
 
 echo "\nScript done @ $(date)" | tee -a "$LOG_FILE"
