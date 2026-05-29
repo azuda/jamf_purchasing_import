@@ -15,11 +15,15 @@ from jamf_credential import JAMF_URL, check_token_expiration, get_token, invalid
 import json
 import os
 import requests
+import threading
 import time
 import truststore
 import urllib3
 
 truststore.inject_into_ssl()
+
+SEMAPHORE = threading.Semaphore(20)
+PRINT_LOCK = threading.Lock()
 
 TESTING = False
 # TESTING = True
@@ -61,17 +65,17 @@ def make_session():
   session.mount("https://", adapter)
   return session
 
-def jamf_get(endpoint, token, session):
+def jamf_get(endpoint, token, session, timeout=30):
   token["t"], token["expiration"] = check_token_expiration(token["t"], token["expiration"])
   url = f"{JAMF_URL}{endpoint}"
   headers = {
     "accept": "application/json",
     "authorization": f"Bearer {token["t"]}"
   }
-  response = session.get(url, headers=headers)
+  response = session.get(url, headers=headers, timeout=timeout)
   return response
 
-def jamf_patch(payload, endpoint, token, session):
+def jamf_patch(payload, endpoint, token, session, timeout=30):
   token["t"], token["expiration"] = check_token_expiration(token["t"], token["expiration"])
   url = f"{JAMF_URL}{endpoint}"
   headers = {
@@ -79,52 +83,59 @@ def jamf_patch(payload, endpoint, token, session):
     "content-type": "application/json",
     "authorization": f"Bearer {token["t"]}"
   }
-  response = session.patch(url, json=payload, headers=headers)
+  response = session.patch(url, json=payload, headers=headers, timeout=timeout)
   return response
 
 def patch_computer(c, assets, token, session):
-  sn = c.get("hardware").get("serialNumber")
-  if not sn:
-    return
-  if c.get("purchasing").get("purchasePrice") is not None:
-    print(f"Purchasing info already populated, skipping: {c.get('id')} {sn}")
-    return
-  # if int(c.get("id")) <= 3392:
-  #   return
-  asset = assets.get(sn)
-  if asset is None:
-    print(f"Not in assets.csv, skipping: {c.get('id')} {sn}")
-    return
-  payload = { "purchasing": {
-    "leased": False,
-    "purchased": True,
-    "poNumber": "",
-    "poDate": convert_dt_simple(asset.get("purchase_date", "")),
-    "vendor": asset.get("vendor"),
-    "purchasePrice": f"${asset.get('price')}",
-    "lifeExpectancy": 0,
-    "warrantyDate": None,
-    "appleCareId": "",
-    "leaseDate": None,
-    "purchasingAccount": "",
-    "purchasingContact": ""
-  }}
-  # https://developer.jamf.com/jamf-pro/reference/patch_v3-computers-inventory-detail-id
-  response = jamf_patch(payload, f"/api/v3/computers-inventory-detail/{c.get('id')}", token, session)
-  print(f"c {c.get('id')}\t{sn} → {response.status_code}")
+  with SEMAPHORE:
+    sn = c.get("hardware").get("serialNumber")
+    if not sn:
+      return
+    if c.get("purchasing").get("purchasePrice"):
+      safe_print(f"c Purchasing info already populated, skipping: {c.get('id')} {sn}")
+      return
+    # if int(c.get("id")) <= 3392:
+    #   return
+    asset = assets.get(sn)
+    if asset is None:
+      safe_print(f"c Not in assets.csv, skipping: {c.get('id')} {sn}")
+      return
+    payload = { "purchasing": {
+      "leased": False,
+      "purchased": True,
+      "poNumber": "",
+      "poDate": convert_dt_simple(asset.get("purchase_date", "")),
+      "vendor": asset.get("vendor"),
+      "purchasePrice": f"${asset.get('price')}",
+      "lifeExpectancy": 0,
+      "warrantyDate": None,
+      "appleCareId": "",
+      "leaseDate": None,
+      "purchasingAccount": "",
+      "purchasingContact": ""
+    }}
+    try:
+      # https://developer.jamf.com/jamf-pro/reference/patch_v3-computers-inventory-detail-id
+      response = jamf_patch(payload, f"/api/v3/computers-inventory-detail/{c.get('id')}", token, session)
+      safe_print(f"c {c.get('id')}\t{sn} → {response.status_code}")
+      time.sleep(0.1)
+    except requests.exceptions.Timeout:
+      safe_print(f"c {c.get('id')}\t{sn} → timed out, skipping")
+    except requests.exceptions.ConnectionError as e:
+      safe_print(f"c {c.get('id')}\t{sn} → connection error: {e}, skipping")
 
 def patch_device(d, assets, token, session):
   sn = d.get("hardware").get("serialNumber")
   if not sn:
     return
-  if d.get("purchasing").get("purchasePrice") is not None:
-    print(f"Purchasing info already populated, skipping: {d.get('mobileDeviceId')} {sn}")
+  if d.get("purchasing").get("purchasePrice"):
+    safe_print(f"d Purchasing info already populated, skipping: {d.get('mobileDeviceId')} {sn}")
     return
   # if int(d.get("mobileDeviceId")) <= 1000:
   #   return
   asset = assets.get(sn)
   if asset is None:
-    print(f"Not in assets.csv, skipping: {d.get('mobileDeviceId')} {sn}")
+    safe_print(f"d Not in assets.csv, skipping: {d.get('mobileDeviceId')} {sn}")
     return
   payload = { "ios": { "purchasing": {
     "purchased": True,
@@ -140,7 +151,11 @@ def patch_device(d, assets, token, session):
   }}}
   # https://developer.jamf.com/jamf-pro/reference/patch_v2-mobile-devices-id
   response = jamf_patch(payload, f"/api/v2/mobile-devices/{d.get('mobileDeviceId')}", token, session)
-  print(f"d {d.get('mobileDeviceId')}\t{sn} → {response.status_code}")
+  safe_print(f"d {d.get('mobileDeviceId')}\t{sn} → {response.status_code}")
+
+def safe_print(*args, **kwargs):
+  with PRINT_LOCK:
+    print(*args, **kwargs)
 
 # ==================================================================================
 
@@ -157,7 +172,7 @@ def main():
   # https://developer.jamf.com/jamf-pro/reference/get_v3-computers-inventory
   # https://developer.jamf.com/jamf-pro/reference/get_v2-mobile-devices-detail
   computers = jamf_get("/api/v3/computers-inventory?section=GENERAL&section=HARDWARE&section=PURCHASING&page=0&page-size=2000&sort=id%3Aasc", token, session).json()
-  devices = jamf_get("/api/v2/mobile-devices/detail?section=GENERAL&section=HARDWARE&section=PURCHASING&page=0&page-size=100&sort=mobileDeviceId%3Aasc", token, session).json()
+  devices = jamf_get("/api/v2/mobile-devices/detail?section=GENERAL&section=HARDWARE&section=PURCHASING&page=0&page-size=2000&sort=mobileDeviceId%3Aasc", token, session).json()
 
   # parse assetsonar csv to dict
   with open("assets.csv", "r", encoding="utf-8-sig") as f:
