@@ -8,4 +8,5 @@ logs/
 .env
 
 *.csv
+*.log
 *.xlsx
