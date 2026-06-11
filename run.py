@@ -28,6 +28,9 @@ PRINT_LOCK = threading.Lock()
 TESTING = False
 # TESTING = True
 
+# RUN_ALL = False
+RUN_ALL = True
+
 # ==================================================================================
 
 # define ambiguous timezones
@@ -91,9 +94,10 @@ def patch_computer(c, assets, token, session):
     sn = c.get("hardware").get("serialNumber")
     if not sn:
       return
-    if c.get("purchasing").get("purchasePrice"):
-      safe_print(f"c Purchasing info already populated, skipping: {c.get('id')} {sn}")
-      return
+    if not RUN_ALL:
+      if c.get("purchasing").get("purchasePrice"):
+        safe_print(f"c Purchasing info already populated, skipping: {c.get('id')} {sn}")
+        return
     # if int(c.get("id")) <= 3392:
     #   return
     asset = assets.get(sn)
@@ -103,8 +107,8 @@ def patch_computer(c, assets, token, session):
     payload = { "purchasing": {
       "leased": False,
       "purchased": True,
-      "poNumber": "",
-      "poDate": convert_dt_simple(asset.get("purchase_date", "")),
+      "poNumber": asset.get("po_number", ""),
+      "poDate": convert_dt_simple(asset.get("po_date", "")),
       "vendor": asset.get("vendor"),
       "purchasePrice": f"${asset.get('price')}",
       "lifeExpectancy": 0,
@@ -128,9 +132,10 @@ def patch_device(d, assets, token, session):
   sn = d.get("hardware").get("serialNumber")
   if not sn:
     return
-  if d.get("purchasing").get("purchasePrice"):
-    safe_print(f"d Purchasing info already populated, skipping: {d.get('mobileDeviceId')} {sn}")
-    return
+  if not RUN_ALL:
+    if d.get("purchasing").get("purchasePrice"):
+      safe_print(f"d Purchasing info already populated, skipping: {d.get('mobileDeviceId')} {sn}")
+      return
   # if int(d.get("mobileDeviceId")) <= 1000:
   #   return
   asset = assets.get(sn)
@@ -140,12 +145,12 @@ def patch_device(d, assets, token, session):
   payload = { "ios": { "purchasing": {
     "purchased": True,
     "leased": False,
-    "poNumber": "",
+    "poNumber": asset.get("po_number", ""),
     "vendor": asset.get("vendor"),
     "appleCareId": "",
     "purchasePrice": f"${asset.get('price')}",
     "purchasingAccount": "",
-    **({"poDate": convert_dt_zoned(asset["purchase_date"])} if asset.get("purchase_date") else {}),
+    **({"poDate": convert_dt_zoned(asset["po_date"])} if asset.get("po_date") else {}),
     "lifeExpectancy": 0,
     "purchasingContact": "",
   }}}
