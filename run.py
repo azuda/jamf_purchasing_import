@@ -10,6 +10,7 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import csv
 from dateutil import parser
+from dateutil.relativedelta import relativedelta
 from dateutil.tz import tzoffset
 import jamf_client
 from jamf_client import jamf_session, jamf_get, jamf_patch
@@ -50,6 +51,18 @@ def convert_dt_zoned(timestamp):
   dt = parser.parse(timestamp, tzinfos=TZ_INFO)
   return dt.strftime(f"%Y-%m-%dT%H:%M:%S.{dt.strftime("%f")[:3]}Z")
 
+def warranty_date_simple(po_date):
+  if not po_date:
+    return None
+  dt = parser.parse(po_date) + relativedelta(years=3)
+  return dt.strftime("%Y-%m-%d")
+
+def warranty_date_zoned(po_date):
+  if not po_date:
+    return None
+  dt = parser.parse(po_date, tzinfos=TZ_INFO) + relativedelta(years=3)
+  return dt.strftime(f"%Y-%m-%dT%H:%M:%S.{dt.strftime("%f")[:3]}Z")
+
 # ==================================================================================
 
 def patch_computer(c, assets, token, session):
@@ -75,8 +88,8 @@ def patch_computer(c, assets, token, session):
       "vendor": asset.get("vendor"),
       "purchasePrice": f"${asset.get('price')}",
       "lifeExpectancy": 0,
-      "warrantyDate": None,
-      "appleCareId": "",
+      "warrantyDate": warranty_date_simple(asset.get("po_date")),
+      "appleCareId": asset.get("applecare", ""),
       "leaseDate": None,
       "purchasingAccount": "",
       "purchasingContact": ""
@@ -110,10 +123,12 @@ def patch_device(d, assets, token, session):
     "leased": False,
     "poNumber": asset.get("po_number", ""),
     "vendor": asset.get("vendor"),
-    "appleCareId": "",
+    "appleCareId": asset.get("applecare", ""),
     "purchasePrice": f"${asset.get('price')}",
     "purchasingAccount": "",
     **({"poDate": convert_dt_zoned(asset["po_date"])} if asset.get("po_date") else {}),
+    "warrantyExpiresDate": warranty_date_zoned(asset.get("po_date")),
+    "leaseExpiresDate": None,
     "lifeExpectancy": 0,
     "purchasingContact": "",
   }}}
