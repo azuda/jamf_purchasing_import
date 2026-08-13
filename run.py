@@ -49,7 +49,8 @@ def convert_dt_simple(timestamp):
 
 def convert_dt_zoned(timestamp):
   dt = parser.parse(timestamp, tzinfos=TZ_INFO)
-  return dt.strftime(f"%Y-%m-%dT%H:%M:%S.{dt.strftime("%f")[:3]}Z")
+  milliseconds = dt.strftime("%f")[:3]
+  return dt.strftime(f"%Y-%m-%dT%H:%M:%S.{milliseconds}Z")
 
 def warranty_date_simple(po_date):
   if not po_date:
@@ -61,7 +62,8 @@ def warranty_date_zoned(po_date):
   if not po_date:
     return None
   dt = parser.parse(po_date, tzinfos=TZ_INFO) + relativedelta(years=3)
-  return dt.strftime(f"%Y-%m-%dT%H:%M:%S.{dt.strftime("%f")[:3]}Z")
+  milliseconds = dt.strftime("%f")[:3]
+  return dt.strftime(f"%Y-%m-%dT%H:%M:%S.{milliseconds}Z")
 
 # ==================================================================================
 
