@@ -17,8 +17,15 @@ from jamf_client import jamf_session, jamf_get, jamf_patch
 import json
 import os
 import requests
+import sys
 import threading
 import time
+
+# on windows, stdout/stderr default to the legacy console codepage (eg cp1252)
+# when not attached to a real console (Task Scheduler, piped through
+# Tee-Object, etc), which can't encode arbitrary unicode and crashes print()
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 SEMAPHORE = threading.Semaphore(20)
 PRINT_LOCK = threading.Lock()
@@ -99,12 +106,12 @@ def patch_computer(c, assets, token, session):
     try:
       # https://developer.jamf.com/jamf-pro/reference/patch_v3-computers-inventory-detail-id
       response = jamf_patch(payload, f"/api/v3/computers-inventory-detail/{c.get('id')}", token, session, raise_for_status=False)
-      safe_print(f"c {c.get('id')}\t{sn} → {response.status_code}")
+      safe_print(f"c {c.get('id')}\t{sn} -> {response.status_code}")
       time.sleep(0.1)
     except requests.exceptions.Timeout:
-      safe_print(f"c {c.get('id')}\t{sn} → timed out, skipping")
+      safe_print(f"c {c.get('id')}\t{sn} -> timed out, skipping")
     except requests.exceptions.ConnectionError as e:
-      safe_print(f"c {c.get('id')}\t{sn} → connection error: {e}, skipping")
+      safe_print(f"c {c.get('id')}\t{sn} -> connection error: {e}, skipping")
 
 def patch_device(d, assets, token, session):
   sn = d.get("hardware").get("serialNumber")
@@ -136,7 +143,7 @@ def patch_device(d, assets, token, session):
   }}}
   # https://developer.jamf.com/jamf-pro/reference/patch_v2-mobile-devices-id
   response = jamf_patch(payload, f"/api/v2/mobile-devices/{d.get('mobileDeviceId')}", token, session, raise_for_status=False)
-  safe_print(f"d {d.get('mobileDeviceId')}\t{sn} → {response.status_code}")
+  safe_print(f"d {d.get('mobileDeviceId')}\t{sn} -> {response.status_code}")
 
 def safe_print(*args, **kwargs):
   with PRINT_LOCK:
