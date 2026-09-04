@@ -26,7 +26,9 @@ def find_computer(sn, token, session):
 def find_device(sn, token, session):
   response = jamf_get(
     f"/api/v2/mobile-devices/detail"
-    f"?filter=hardware.serialNumber%3D%3D%22{quote(sn)}%22"
+    # unlike computers-inventory, this endpoint's filter uses the flat
+    # "serialNumber" field, not "hardware.serialNumber"
+    f"?filter=serialNumber%3D%3D%22{quote(sn)}%22"
     "&section=GENERAL&section=HARDWARE&section=PURCHASING",
     token, session,
   ).json()

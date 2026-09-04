@@ -136,8 +136,10 @@ def patch_device(d, assets, token, session):
     "purchasePrice": f"${asset.get('price')}",
     "purchasingAccount": "",
     **({"poDate": convert_dt_zoned(asset["po_date"])} if asset.get("po_date") else {}),
-    "warrantyExpiresDate": warranty_date_zoned(asset.get("po_date")),
-    "leaseExpiresDate": None,
+    # note: jamf's PATCH /api/v2/mobile-devices/{id} throws a 500 if a date
+    # field (eg warrantyExpiresDate, leaseExpiresDate) is sent as null, so
+    # these are omitted entirely instead of set to None when there's no value
+    **({"warrantyExpiresDate": warranty_date_zoned(asset["po_date"])} if asset.get("po_date") else {}),
     "lifeExpectancy": 0,
     "purchasingContact": "",
   }}}
