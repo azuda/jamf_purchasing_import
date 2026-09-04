@@ -27,7 +27,7 @@ import time
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-SEMAPHORE = threading.Semaphore(20)
+SEMAPHORE = threading.Semaphore(10)
 PRINT_LOCK = threading.Lock()
 
 TESTING = False
