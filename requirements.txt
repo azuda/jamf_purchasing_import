@@ -1,3 +1,4 @@
 python-dateutil==2.9.0
 requests==2.32.5
 tqdm==4.67.3
+PyJWT[crypto]==2.10.1
