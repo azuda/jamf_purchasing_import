@@ -43,12 +43,12 @@ if not token_response.ok:
 
 access_token = token_response.json()["access_token"]
 
-headers = {"Authorization": f"Bearer {access_token}"}
+headers = { "Authorization": f"Bearer {access_token}" }
 devices = []
 url = API_URL
 params = {
-  "limit": 1000,
   "fields[orgDevices]": "serialNumber,deviceModel,status,addedToOrgDateTime,releasedFromOrgDateTime,partNumber,orderNumber,purchaseSourceType",
+  "limit": 1000,
 }
 
 while url:
@@ -78,3 +78,10 @@ with open(output_file, "wt") as f:
   json.dump(active_devices, f, indent=2)
 
 print(f"Wrote {len(active_devices)} devices to {output_file}")
+
+
+device_id = "L26R4TY6Q3"
+headers = { "Authorization": f"Bearer {access_token}" }
+test_applecare = requests.get(f"https://api-school.apple.com/v1/orgDevices/{device_id}/appleCareCoverage", headers=headers)
+with open(os.path.join(script_dir, "debug/asm_applecare.json"), "wt") as f:
+  json.dump(test_applecare.json(), f, indent=2)
